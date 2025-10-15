@@ -10,6 +10,8 @@ import webbrowser
 from datetime import datetime
 import psutil
 import random
+import time
+from pynput.keyboard import Key, Controller
 
 class AssistenteVoz:
     def __init__(self):
@@ -24,6 +26,15 @@ class AssistenteVoz:
         self.processos = self.configurar_processos()
         self.nome_usuario = "Mestre Eduardo"
 
+    def obter_saudacao_periodo(self):
+        hora = datetime.now().hour
+        if 5 <= hora < 12:
+            return f"Bom dia, {self.nome_usuario}"
+        elif 12 <= hora < 18:
+            return f"Boa tarde, {self.nome_usuario}"
+        else:
+            return f"Boa noite, {self.nome_usuario}"
+
     def configurar_voz(self):
         voices = self.engine.getProperty('voices')
 
@@ -32,16 +43,17 @@ class AssistenteVoz:
                 self.engine.setProperty('voice', voice.id)
                 break
 
-        self.engine.setProperty('rate', 180)  
-        self.engine.setProperty('volume', 0.9) 
+        self.engine.setProperty('rate', 180)
+        self.engine.setProperty('volume', 0.9)
 
     def configurar_apps(self):
         if self.sistema == "Windows":
             return {
                 'netflix': 'start shell:AppsFolder\\4DF9E0F8.Netflix_mcm4njqhnhss8!Netflix.App',
-                'opera': 'C:\\Program Files\\Opera\\launcher.exe',
+                'opera': 'start opera',
+                'opera gx': 'start opera',
                 'discord': os.path.join(os.getenv('LOCALAPPDATA'), 'Discord\\Update.exe --processStart Discord.exe'),
-                'whatsapp': 'start shell:AppsFolder\\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!WhatsAppDesktop',
+                'whatsapp': 'start whatsapp:',
                 'chrome': 'start chrome',
                 'edge': 'start microsoft-edge:',
                 'spotify': 'start spotify:',
@@ -60,7 +72,7 @@ class AssistenteVoz:
                 'spotify': 'spotify',
                 'steam': 'steam',
                 'cursor': 'cursor .',
-                "vscode": 'code .'
+                'vscode': 'code .'
             }
         elif self.sistema == "Darwin":
             return {
@@ -73,21 +85,23 @@ class AssistenteVoz:
                 'spotify': 'open -a "Spotify"',
                 'steam': 'open -a "Steam"',
                 'cursor': 'cursor .',
-                "vscode": "code ."
+                'vscode': 'code .'
             }
         return {}
 
     def configurar_processos(self):
         if self.sistema == "Windows":
             return {
-                'netflix': 'Netflix.exe',
+                'netflix': ['Netflix.exe', 'msedge.exe', 'chrome.exe'],
                 'opera': 'opera.exe',
+                'opera gx': 'opera.exe',
                 'discord': 'Discord.exe',
-                'whatsapp': 'WhatsApp.exe',
+                'whatsapp': ['WhatsApp.exe', 'msedge.exe', 'chrome.exe'],
                 'chrome': 'chrome.exe',
                 'edge': 'msedge.exe',
                 'spotify': 'Spotify.exe',
                 'steam': 'steam.exe',
+                'cursor': 'cursor.exe'
             }
         elif self.sistema == "Linux":
             return {
@@ -120,7 +134,7 @@ class AssistenteVoz:
 
     def ouvir(self):
         with self.microphone as source:
-            print("\n🎤 Escutando... (fale agora)")
+            print("\n🎤 Ouvindo...")
             self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
 
             try:
@@ -128,55 +142,24 @@ class AssistenteVoz:
                 print("🔄 Processando...")
 
                 comando = self.recognizer.recognize_google(audio, language='pt-BR')
-                print(f"✅ Você disse: {comando}")
+                print(f"👤 Você disse: {comando}")
                 return comando.lower()
 
             except sr.WaitTimeoutError:
-                print("⏱️  Tempo esgotado. Nenhum comando detectado.")
-                return ""
+                print("⏱️  Tempo esgotado. Nenhum som detectado.")
+                return None
             except sr.UnknownValueError:
                 print("❌ Não consegui entender o que você disse.")
-                return ""
-            except sr.RequestError as e:
-                print(f"❌ Erro no serviço de reconhecimento: {e}")
-                return ""
-
-    def desligar_pc(self):
-        self.falar("Desligando o computador em 5 segundos. Até logo!")
-
-        if self.sistema == "Windows":
-            os.system("shutdown /s /t 5")
-        elif self.sistema == "Linux":
-            os.system("shutdown -h +1")
-        elif self.sistema == "Darwin":
-            os.system("sudo shutdown -h +1")
-
-    def reiniciar_pc(self):
-        self.falar("Reiniciando o computador em 5 segundos.")
-
-        if self.sistema == "Windows":
-            os.system("shutdown /r /t 5")
-        elif self.sistema == "Linux":
-            os.system("shutdown -r +1")
-        elif self.sistema == "Darwin":
-            os.system("sudo shutdown -r +1")
-
-    def cancelar_desligamento(self):
-        self.falar("Cancelando o desligamento.")
-
-        if self.sistema == "Windows":
-            os.system("shutdown /a")
-        elif self.sistema in ["Linux", "Darwin"]:
-            os.system("sudo shutdown -c")
+                return None
+            except sr.RequestError:
+                print("❌ Erro ao conectar ao serviço de reconhecimento de voz.")
+                return None
 
     def abrir_app(self, app_nome):
         if app_nome in self.apps:
             self.falar(f"Abrindo {app_nome}")
             try:
-                if self.sistema == "Windows":
-                    os.system(self.apps[app_nome])
-                else:
-                    subprocess.Popen(self.apps[app_nome], shell=True)
+                os.system(self.apps[app_nome])
                 return True
             except Exception as e:
                 self.falar(f"Erro ao abrir {app_nome}")
@@ -190,12 +173,24 @@ class AssistenteVoz:
         if app_nome in self.processos:
             self.falar(f"Fechando {app_nome}")
             try:
-                if self.sistema == "Windows":
-                    os.system(f"taskkill /F /IM {self.processos[app_nome]}")
-                elif self.sistema == "Linux":
-                    os.system(f"pkill -f {self.processos[app_nome]}")
-                elif self.sistema == "Darwin":
-                    os.system(f"killall '{self.processos[app_nome]}'")
+                processos = self.processos[app_nome]
+                if isinstance(processos, list):
+                    fechou_algum = False
+                    for processo in processos:
+                        resultado = os.system(f"taskkill /F /IM {processo} 2>nul")
+                        if resultado == 0:
+                            fechou_algum = True
+                    if not fechou_algum:
+                        self.falar(f"{app_nome} não está aberto no momento")
+                else:
+                    if self.sistema == "Windows":
+                        resultado = os.system(f"taskkill /F /IM {processos} 2>nul")
+                        if resultado != 0:
+                            self.falar(f"{app_nome} não está aberto no momento")
+                    elif self.sistema == "Linux":
+                        os.system(f"pkill -f {processos}")
+                    elif self.sistema == "Darwin":
+                        os.system(f"killall '{processos}'")
                 return True
             except Exception as e:
                 self.falar(f"Erro ao fechar {app_nome}")
@@ -204,6 +199,33 @@ class AssistenteVoz:
         else:
             self.falar(f"Desculpe, não sei como fechar {app_nome}")
             return False
+
+    def desligar_pc(self):
+        self.falar("Desligando o computador em 1 minuto")
+        if self.sistema == "Windows":
+            os.system("shutdown /s /t 60")
+        elif self.sistema == "Linux":
+            os.system("shutdown -h +1")
+        elif self.sistema == "Darwin":
+            os.system("sudo shutdown -h +1")
+
+    def reiniciar_pc(self):
+        self.falar("Reiniciando o computador em 1 minuto")
+        if self.sistema == "Windows":
+            os.system("shutdown /r /t 60")
+        elif self.sistema == "Linux":
+            os.system("shutdown -r +1")
+        elif self.sistema == "Darwin":
+            os.system("sudo shutdown -r +1")
+
+    def cancelar_desligamento(self):
+        self.falar("Cancelando o desligamento")
+        if self.sistema == "Windows":
+            os.system("shutdown /a")
+        elif self.sistema == "Linux":
+            os.system("shutdown -c")
+        elif self.sistema == "Darwin":
+            os.system("sudo killall shutdown")
 
     def abrir_site(self, site):
         sites = {
@@ -215,6 +237,7 @@ class AssistenteVoz:
             'github': 'https://www.github.com',
             'amazon': 'https://www.amazon.com.br',
             'mercado livre': 'https://www.mercadolivre.com.br',
+            'linkedin': 'https://www.linkedin.com',
         }
 
         if site in sites:
@@ -275,6 +298,7 @@ class AssistenteVoz:
             os.system("osascript -e 'set volume output muted true'")
 
     def bloquear_pc(self):
+        """Bloqueia o computador"""
         self.falar("Bloqueando o computador")
         if self.sistema == "Windows":
             os.system("rundll32.exe user32.dll,LockWorkStation")
@@ -308,7 +332,7 @@ class AssistenteVoz:
         ]
         self.falar(random.choice(piadas))
 
-    def tocar_musica_aleatoria(self):
+    def tocar_musica_aleatoria(self):"
         self.falar(f"Abrindo música para você, {self.nome_usuario}")
         webbrowser.open("https://www.youtube.com/results?search_query=música+relaxante")
 
@@ -370,11 +394,58 @@ class AssistenteVoz:
         self.falar("Abrindo email")
         webbrowser.open("https://mail.google.com")
 
+    def discord_silenciar(self):
+        self.falar("Alternando microfone no Discord")
+        keyboard = Controller()
+        keyboard.press(Key.ctrl)
+        keyboard.press(Key.shift)
+        keyboard.press('m')
+        keyboard.release('m')
+        keyboard.release(Key.shift)
+        keyboard.release(Key.ctrl)
+
+    def discord_deafen(self):
+        self.falar("Alternando áudio no Discord")
+        keyboard = Controller()
+        keyboard.press(Key.ctrl)
+        keyboard.press(Key.shift)
+        keyboard.press('d')
+        keyboard.release('d')
+        keyboard.release(Key.shift)
+        keyboard.release(Key.ctrl)
+
+    def discord_sair_chamada(self):
+        self.falar("Saindo da chamada no Discord")
+        keyboard = Controller()
+        keyboard.press(Key.ctrl)
+        keyboard.press(Key.shift)
+        keyboard.press('h')
+        keyboard.release('h')
+        keyboard.release(Key.shift)
+        keyboard.release(Key.ctrl)
+
+    def spotify_tocar_pausar(self):
+        self.falar("Alternando música no Spotify")
+        keyboard = Controller()
+        keyboard.press(Key.media_play_pause)
+        keyboard.release(Key.media_play_pause)
+
+    def spotify_proxima(self):
+        self.falar("Próxima música")
+        keyboard = Controller()
+        keyboard.press(Key.media_next)
+        keyboard.release(Key.media_next)
+
+    def spotify_anterior(self):
+        self.falar("Música anterior")
+        keyboard = Controller()
+        keyboard.press(Key.media_previous)
+        keyboard.release(Key.media_previous)
+
     def processar_comando(self, comando):
         if not comando:
             return True
 
-        # Comandos de controle do sistema
         if "desligar" in comando or "desliga" in comando:
             self.desligar_pc()
             return False
@@ -447,10 +518,11 @@ class AssistenteVoz:
             self.info_sistema()
 
         elif "olá" in comando or "oi" in comando:
+            periodo = self.obter_saudacao_periodo()
             saudacoes = [
-                f"Olá {self.nome_usuario}! Como posso ajudá-lo?",
-                f"Oi {self.nome_usuario}! Estou às suas ordens!",
-                f"Olá {self.nome_usuario}! Pronto para atendê-lo!"
+                f"{periodo}! Como posso ajudá-lo?",
+                f"{periodo}! Estou às suas ordens!",
+                f"{periodo}! Pronto para atendê-lo!"
             ]
             self.falar(random.choice(saudacoes))
 
@@ -493,6 +565,24 @@ class AssistenteVoz:
         elif "email" in comando or "e-mail" in comando:
             self.abrir_email()
 
+        elif "discord silenciar" in comando or "discord mudo" in comando or "mutar discord" in comando:
+            self.discord_silenciar()
+
+        elif "discord deafen" in comando or "desligar áudio discord" in comando:
+            self.discord_deafen()
+
+        elif "sair da chamada" in comando or "desconectar discord" in comando or "sair chamada discord" in comando:
+            self.discord_sair_chamada()
+
+        elif "pausar música" in comando or "pausar spotify" in comando or "tocar música spotify" in comando:
+            self.spotify_tocar_pausar()
+
+        elif "próxima música" in comando or "próxima" in comando or "pular música" in comando:
+            self.spotify_proxima()
+
+        elif "música anterior" in comando or "anterior" in comando or "voltar música" in comando:
+            self.spotify_anterior()
+
         elif "ajuda" in comando or "comandos" in comando:
             self.mostrar_ajuda()
 
@@ -524,6 +614,8 @@ class AssistenteVoz:
             "Modo produtivo / Tirar screenshot",
             "Abrir calculadora / Bloco de notas / Gerenciador de tarefas",
             "Clima / Notícias / Email",
+            "Discord: Silenciar / Deafen / Sair da chamada",
+            "Spotify: Pausar / Próxima / Anterior",
             "Limpar tela",
             "Sair do assistente"
         ]
@@ -535,7 +627,8 @@ class AssistenteVoz:
         self.falar("Mostrei os comandos disponíveis na tela.")
 
     def executar(self):
-        self.falar(f"Olá {self.nome_usuario}! Assistente de voz iniciado e pronto para servi-lo. Diga 'ajuda' para ver os comandos disponíveis.")
+        saudacao = self.obter_saudacao_periodo()
+        self.falar(f"{saudacao}! Assistente de voz iniciado e pronto para servi-lo. Diga 'ajuda' para ver os comandos disponíveis.")
 
         continuar = True
         while continuar:
@@ -555,7 +648,7 @@ def main():
     print("🤖 ASSISTENTE DE VOZ PARA CONTROLE DO COMPUTADOR")
     print("="*60)
     print("\n⚠️  REQUISITOS:")
-    print("  pip install SpeechRecognition pyttsx3 pyaudio")
+    print("  pip install SpeechRecognition pyttsx3 pyaudio psutil")
     print("\n💡 DICA: Fale de forma clara e pausada")
     print("="*60)
 
@@ -565,7 +658,7 @@ def main():
     except Exception as e:
         print(f"\n❌ Erro ao iniciar o assistente: {e}")
         print("\nVerifique se você instalou todas as dependências:")
-        print("  pip install SpeechRecognition pyttsx3 pyaudio")
+        print("  pip install SpeechRecognition pyttsx3 pyaudio psutil")
         sys.exit(1)
 
 
