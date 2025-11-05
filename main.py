@@ -298,7 +298,6 @@ class AssistenteVoz:
             os.system("osascript -e 'set volume output muted true'")
 
     def bloquear_pc(self):
-        """Bloqueia o computador"""
         self.falar("Bloqueando o computador")
         if self.sistema == "Windows":
             os.system("rundll32.exe user32.dll,LockWorkStation")
@@ -332,7 +331,7 @@ class AssistenteVoz:
         ]
         self.falar(random.choice(piadas))
 
-    def tocar_musica_aleatoria(self):"
+    def tocar_musica_aleatoria(self):
         self.falar(f"Abrindo música para você, {self.nome_usuario}")
         webbrowser.open("https://www.youtube.com/results?search_query=música+relaxante")
 
