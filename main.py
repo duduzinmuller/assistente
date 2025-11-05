@@ -12,12 +12,12 @@ from datetime import datetime
 
 import psutil
 import speech_recognition as sr
-
 try:
     import whisper
 except Exception as error:  # pragma: no cover - optional dependency may fail on some platforms
     whisper = None
     print(f"⚠️  Whisper não pôde ser importado: {error}")
+
 import whisper
 from pynput.keyboard import Key, Controller
 
@@ -66,14 +66,7 @@ class AssistenteVoz:
             except Exception as error:
                 print(f"⚠️  Não foi possível carregar o modelo Whisper: {error}")
                 self.whisper_model = None
-        else
-        
-        try:
-            modelo_whisper = os.getenv("WHISPER_MODEL", "base")
-            self.whisper_model = whisper.load_model(modelo_whisper)
-        except Exception as error:
-            print(f"⚠️  Não foi possível carregar o modelo Whisper: {error}")
-            
+        else:
             self.whisper_model = None
 
         self.sistema = platform.system()
@@ -212,26 +205,12 @@ class AssistenteVoz:
                 audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=5)
                 print("🔄 Processando...")
 
+                comando = None
                 if self.whisper_model is not None:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
-                        temp_audio.write(audio.get_wav_data())
-                        temp_path = temp_audio.name
+                    comando = self._transcrever_com_whisper(audio)
 
-                    try:
-                        resultado = self.whisper_model.transcribe(
-                            temp_path,
-                            language="pt",
-                            task="transcribe",
-                            fp16=False,
-                        )
-                        comando = resultado.get("text", "").strip()
-                    finally:
-                        try:
-                            os.remove(temp_path)
-                        except OSError:
-                            pass
-                else:
-                    comando = self.recognizer.recognize_google(audio, language='pt-BR')
+                if not comando:
+                    comando = self._transcrever_com_google(audio)
 
                 if comando:
                     print(f"👤 Você disse: {comando}")
@@ -252,6 +231,43 @@ class AssistenteVoz:
             except Exception as error:
                 print(f"❌ Erro inesperado no reconhecimento de voz: {error}")
                 return None
+
+    def _transcrever_com_whisper(self, audio):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+            temp_audio.write(audio.get_wav_data())
+            temp_path = temp_audio.name
+
+        try:
+            resultado = self.whisper_model.transcribe(
+                temp_path,
+                language="pt",
+                task="transcribe",
+                fp16=False,
+            )
+            return resultado.get("text", "").strip()
+        except FileNotFoundError as error:
+            print("⚠️  Whisper precisa do FFmpeg instalado no sistema para funcionar. Voltando para o reconhecimento do Google.")
+            print(f"Detalhes: {error}")
+            return None
+        except Exception as error:
+            print(f"⚠️  Não foi possível transcrever com o Whisper: {error}")
+            return None
+        finally:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+    def _transcrever_com_google(self, audio):
+        try:
+            return self.recognizer.recognize_google(audio, language='pt-BR')
+        except sr.UnknownValueError:
+            raise
+        except sr.RequestError:
+            raise
+        except Exception as error:
+            print(f"⚠️  Não foi possível usar o reconhecimento do Google: {error}")
+            return None
 
     def abrir_app(self, app_nome):
         if app_nome in self.apps:
