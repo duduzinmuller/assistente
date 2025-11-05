@@ -66,7 +66,8 @@ class AssistenteVoz:
             except Exception as error:
                 print(f"⚠️  Não foi possível carregar o modelo Whisper: {error}")
                 self.whisper_model = None
-        else
+        else:
+            print(f"⚠️  Whisper não pôde ser importado: {error}")
         
         try:
             modelo_whisper = os.getenv("WHISPER_MODEL", "base")
