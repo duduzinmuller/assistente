@@ -12,11 +12,13 @@ from datetime import datetime
 
 import psutil
 import speech_recognition as sr
+
 try:
     import whisper
 except Exception as error:  # pragma: no cover - optional dependency may fail on some platforms
     whisper = None
     print(f"⚠️  Whisper não pôde ser importado: {error}")
+import whisper
 from pynput.keyboard import Key, Controller
 
 try:
@@ -56,6 +58,7 @@ class AssistenteVoz:
                 self.elevenlabs_client = None
 
         self.whisper_model = None
+
         if whisper is not None:
             try:
                 modelo_whisper = os.getenv("WHISPER_MODEL", "base")
@@ -63,7 +66,14 @@ class AssistenteVoz:
             except Exception as error:
                 print(f"⚠️  Não foi possível carregar o modelo Whisper: {error}")
                 self.whisper_model = None
-        else:
+        else
+        
+        try:
+            modelo_whisper = os.getenv("WHISPER_MODEL", "base")
+            self.whisper_model = whisper.load_model(modelo_whisper)
+        except Exception as error:
+            print(f"⚠️  Não foi possível carregar o modelo Whisper: {error}")
+            
             self.whisper_model = None
 
         self.sistema = platform.system()
