@@ -17,6 +17,8 @@ try:
 except Exception as error:  # pragma: no cover - optional dependency may fail on some platforms
     whisper = None
     print(f"⚠️  Whisper não pôde ser importado: {error}")
+
+import whisper
 from pynput.keyboard import Key, Controller
 
 try:
@@ -56,6 +58,7 @@ class AssistenteVoz:
                 self.elevenlabs_client = None
 
         self.whisper_model = None
+
         if whisper is not None:
             try:
                 modelo_whisper = os.getenv("WHISPER_MODEL", "base")
