@@ -1,25 +1,63 @@
 
 
-import speech_recognition as sr
-import pyttsx3
 import os
-import sys
-import subprocess
 import platform
+import random
+import subprocess
+import sys
+import tempfile
+import time
 import webbrowser
 from datetime import datetime
+
 import psutil
-import random
-import time
+import speech_recognition as sr
+import whisper
 from pynput.keyboard import Key, Controller
+
+try:
+    import pyttsx3
+except ImportError:  # pragma: no cover - fallback only when dependency missing
+    pyttsx3 = None
+
+try:
+    from elevenlabs import ElevenLabs, play
+except ImportError:  # pragma: no cover - fallback only when dependency missing
+    ElevenLabs = None
+    play = None
 
 class AssistenteVoz:
     def __init__(self):
         self.recognizer = sr.Recognizer()
         self.microphone = sr.Microphone()
 
-        self.engine = pyttsx3.init()
-        self.configurar_voz()
+        self.engine = None
+        if pyttsx3 is not None:
+            try:
+                self.engine = pyttsx3.init()
+                self.configurar_voz()
+            except Exception as error:  # pragma: no cover - defensive fallback
+                print(f"⚠️  Não foi possível inicializar o mecanismo padrão de voz: {error}")
+                self.engine = None
+
+        self.elevenlabs_client = None
+        self.elevenlabs_model = os.getenv("ELEVENLABS_MODEL", "eleven_monolingual_v1")
+        self.elevenlabs_voice = os.getenv("ELEVENLABS_VOICE", "Bella")
+        api_key = os.getenv("ELEVENLABS_API_KEY")
+        if ElevenLabs is not None and api_key:
+            try:
+                self.elevenlabs_client = ElevenLabs(api_key=api_key)
+            except Exception as error:  # pragma: no cover - network/service failure safeguard
+                print(f"⚠️  Não foi possível conectar ao ElevenLabs: {error}")
+                self.elevenlabs_client = None
+
+        self.whisper_model = None
+        try:
+            modelo_whisper = os.getenv("WHISPER_MODEL", "base")
+            self.whisper_model = whisper.load_model(modelo_whisper)
+        except Exception as error:
+            print(f"⚠️  Não foi possível carregar o modelo Whisper: {error}")
+            self.whisper_model = None
 
         self.sistema = platform.system()
         self.apps = self.configurar_apps()
@@ -36,6 +74,9 @@ class AssistenteVoz:
             return f"Boa noite, {self.nome_usuario}"
 
     def configurar_voz(self):
+        if self.engine is None:
+            return
+
         voices = self.engine.getProperty('voices')
 
         for voice in voices:
@@ -129,8 +170,21 @@ class AssistenteVoz:
 
     def falar(self, texto):
         print(f"🤖 Assistente: {texto}")
-        self.engine.say(texto)
-        self.engine.runAndWait()
+        if self.elevenlabs_client is not None and play is not None:
+            try:
+                audio = self.elevenlabs_client.generate(
+                    text=texto,
+                    voice=self.elevenlabs_voice,
+                    model=self.elevenlabs_model,
+                )
+                play(audio)
+                return
+            except Exception as error:
+                print(f"⚠️  Falha ao utilizar o ElevenLabs: {error}")
+
+        if self.engine is not None:
+            self.engine.say(texto)
+            self.engine.runAndWait()
 
     def ouvir(self):
         with self.microphone as source:
@@ -141,9 +195,33 @@ class AssistenteVoz:
                 audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=5)
                 print("🔄 Processando...")
 
-                comando = self.recognizer.recognize_google(audio, language='pt-BR')
-                print(f"👤 Você disse: {comando}")
-                return comando.lower()
+                if self.whisper_model is not None:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+                        temp_audio.write(audio.get_wav_data())
+                        temp_path = temp_audio.name
+
+                    try:
+                        resultado = self.whisper_model.transcribe(
+                            temp_path,
+                            language="pt",
+                            task="transcribe",
+                            fp16=False,
+                        )
+                        comando = resultado.get("text", "").strip()
+                    finally:
+                        try:
+                            os.remove(temp_path)
+                        except OSError:
+                            pass
+                else:
+                    comando = self.recognizer.recognize_google(audio, language='pt-BR')
+
+                if comando:
+                    print(f"👤 Você disse: {comando}")
+                    return comando.lower()
+                else:
+                    print("❌ Nenhuma transcrição encontrada.")
+                    return None
 
             except sr.WaitTimeoutError:
                 print("⏱️  Tempo esgotado. Nenhum som detectado.")
@@ -153,6 +231,9 @@ class AssistenteVoz:
                 return None
             except sr.RequestError:
                 print("❌ Erro ao conectar ao serviço de reconhecimento de voz.")
+                return None
+            except Exception as error:
+                print(f"❌ Erro inesperado no reconhecimento de voz: {error}")
                 return None
 
     def abrir_app(self, app_nome):
