@@ -3,10 +3,9 @@
 import os
 import platform
 import random
-import subprocess
+import shutil
 import sys
 import tempfile
-import time
 import webbrowser
 from datetime import datetime
 
@@ -14,11 +13,9 @@ import psutil
 import speech_recognition as sr
 try:
     import whisper
-except Exception as error:  # pragma: no cover - optional dependency may fail on some platforms
+except Exception as error:  # pragma: no cover - optional dependency may fail em alguns sistemas
     whisper = None
     print(f"⚠️  Whisper não pôde ser importado: {error}")
-
-import whisper
 from pynput.keyboard import Key, Controller
 
 try:
@@ -34,6 +31,7 @@ except ImportError:  # pragma: no cover - fallback only when dependency missing
 
 class AssistenteVoz:
     def __init__(self):
+        self._carregar_variaveis_ambiente()
         self.recognizer = sr.Recognizer()
         self.microphone = sr.Microphone()
 
@@ -56,23 +54,52 @@ class AssistenteVoz:
             except Exception as error:  # pragma: no cover - network/service failure safeguard
                 print(f"⚠️  Não foi possível conectar ao ElevenLabs: {error}")
                 self.elevenlabs_client = None
+        elif ElevenLabs is not None and not api_key:
+            print(
+                "ℹ️  Defina a variável de ambiente ELEVENLABS_API_KEY com sua chave ou adicione-a ao arquivo .env "
+                "para habilitar a voz do ElevenLabs."
+            )
 
+        self.ffmpeg_disponivel = self._verificar_ffmpeg()
         self.whisper_model = None
-
-        if whisper is not None:
+        if whisper is not None and self.ffmpeg_disponivel:
             try:
                 modelo_whisper = os.getenv("WHISPER_MODEL", "base")
                 self.whisper_model = whisper.load_model(modelo_whisper)
             except Exception as error:
                 print(f"⚠️  Não foi possível carregar o modelo Whisper: {error}")
                 self.whisper_model = None
-        else:
+        elif whisper is None:
             self.whisper_model = None
+        elif not self.ffmpeg_disponivel:
+            print("⚠️  FFmpeg não foi encontrado no sistema. Whisper ficará desativado até que o programa seja instalado e disponível no PATH.")
+            print("   • Windows: instale em https://www.gyan.dev/ffmpeg e adicione a pasta /bin ao PATH.")
+            print("   • Linux: utilize o gerenciador de pacotes (ex.: sudo apt install ffmpeg).")
+            print("   • macOS: instale via Homebrew (brew install ffmpeg).")
 
         self.sistema = platform.system()
         self.apps = self.configurar_apps()
         self.processos = self.configurar_processos()
         self.nome_usuario = "Mestre Eduardo"
+
+    def _carregar_variaveis_ambiente(self):
+        arquivo_env = os.getenv("ASSISTENTE_ENV_FILE", ".env")
+        if not os.path.isfile(arquivo_env):
+            return
+
+        try:
+            with open(arquivo_env, encoding="utf-8") as handler:
+                for linha in handler:
+                    linha = linha.strip()
+                    if not linha or linha.startswith("#") or "=" not in linha:
+                        continue
+
+                    chave, valor = linha.split("=", 1)
+                    chave = chave.strip()
+                    valor = valor.strip().strip('"').strip("'")
+                    os.environ.setdefault(chave, valor)
+        except OSError as error:
+            print(f"⚠️  Não foi possível carregar variáveis do arquivo {arquivo_env}: {error}")
 
     def obter_saudacao_periodo(self):
         hora = datetime.now().hour
@@ -232,7 +259,15 @@ class AssistenteVoz:
                 print(f"❌ Erro inesperado no reconhecimento de voz: {error}")
                 return None
 
+    def _verificar_ffmpeg(self):
+        caminho = shutil.which("ffmpeg")
+        if caminho is None:
+            return False
+        return True
+
     def _transcrever_com_whisper(self, audio):
+        if not self.ffmpeg_disponivel:
+            return None
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
             temp_audio.write(audio.get_wav_data())
             temp_path = temp_audio.name
@@ -246,8 +281,11 @@ class AssistenteVoz:
             )
             return resultado.get("text", "").strip()
         except FileNotFoundError as error:
-            print("⚠️  Whisper precisa do FFmpeg instalado no sistema para funcionar. Voltando para o reconhecimento do Google.")
-            print(f"Detalhes: {error}")
+            if self.ffmpeg_disponivel:
+                print(f"⚠️  Whisper encontrou um problema ao chamar o FFmpeg: {error}")
+            else:
+                print("⚠️  Whisper precisa do FFmpeg instalado no sistema para funcionar. Voltando para o reconhecimento do Google.")
+            self.ffmpeg_disponivel = False
             return None
         except Exception as error:
             print(f"⚠️  Não foi possível transcrever com o Whisper: {error}")
