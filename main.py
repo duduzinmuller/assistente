@@ -1,122 +1,58 @@
+#!/usr/bin/env python3
+"""
+Assistente de Voz para Controle do Computador
+Requer: pip install SpeechRecognition pyaudio psutil edge-tts pygame
+"""
 
-
+import speech_recognition as sr
 import os
-import platform
-import random
-import shutil
 import sys
-import tempfile
+import subprocess
+import platform
 import webbrowser
 from datetime import datetime
-
 import psutil
-import speech_recognition as sr
-
-try:
-    import whisper
-except Exception as error:  # pragma: no cover - optional dependency may fail em alguns sistemas
-    whisper = None
-    print(f"⚠️  Whisper não pôde ser importado: {error}")
-<<<<<<< HEAD
-import whisper
-=======
->>>>>>> a3930666b640be8af37ffb825ed0b1cedb763eb0
+import random
+import time
+import asyncio
+import tempfile
+import edge_tts
+import pygame
 from pynput.keyboard import Key, Controller
 
-try:
-    import pyttsx3
-except ImportError:  # pragma: no cover - fallback only when dependency missing
-    pyttsx3 = None
+async def _gerar_audio_edge_tts(texto: str, voz: str) -> str:
+    communicate = edge_tts.Communicate(texto, voice=voz)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as handler:
+        caminho = handler.name
+    await communicate.save(caminho)
+    return caminho
 
-try:
-    from elevenlabs import ElevenLabs, play
-except ImportError:  # pragma: no cover - fallback only when dependency missing
-    ElevenLabs = None
-    play = None
+def _run_async(coro):
+    try:
+        return asyncio.run(coro)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coro)
+        finally:
+            try:
+                loop.close()
+            finally:
+                asyncio.set_event_loop(None)
 
 class AssistenteVoz:
     def __init__(self):
-        self._carregar_variaveis_ambiente()
         self.recognizer = sr.Recognizer()
         self.microphone = sr.Microphone()
 
-        self.engine = None
-        if pyttsx3 is not None:
-            try:
-                self.engine = pyttsx3.init()
-                self.configurar_voz()
-            except Exception as error:  # pragma: no cover - defensive fallback
-                print(f"⚠️  Não foi possível inicializar o mecanismo padrão de voz: {error}")
-                self.engine = None
-
-        self.elevenlabs_client = None
-        self.elevenlabs_model = os.getenv("ELEVENLABS_MODEL", "eleven_monolingual_v1")
-        self.elevenlabs_voice = os.getenv("ELEVENLABS_VOICE", "Bella")
-        api_key = os.getenv("ELEVENLABS_API_KEY")
-        if ElevenLabs is not None and api_key:
-            try:
-                self.elevenlabs_client = ElevenLabs(api_key=api_key)
-            except Exception as error:  # pragma: no cover - network/service failure safeguard
-                print(f"⚠️  Não foi possível conectar ao ElevenLabs: {error}")
-                self.elevenlabs_client = None
-        elif ElevenLabs is not None and not api_key:
-            print(
-                "ℹ️  Defina a variável de ambiente ELEVENLABS_API_KEY com sua chave ou adicione-a ao arquivo .env "
-                "para habilitar a voz do ElevenLabs."
-            )
-
-        self.ffmpeg_disponivel = self._verificar_ffmpeg()
-        self.whisper_model = None
-        if whisper is not None and self.ffmpeg_disponivel:
-            try:
-                modelo_whisper = os.getenv("WHISPER_MODEL", "base")
-                self.whisper_model = whisper.load_model(modelo_whisper)
-            except Exception as error:
-                print(f"⚠️  Não foi possível carregar o modelo Whisper: {error}")
-                self.whisper_model = None
-<<<<<<< HEAD
-        else:
-            print(f"⚠️  Whisper não pôde ser importado: {error}")
-        
-        try:
-            modelo_whisper = os.getenv("WHISPER_MODEL", "base")
-            self.whisper_model = whisper.load_model(modelo_whisper)
-        except Exception as error:
-            print(f"⚠️  Não foi possível carregar o modelo Whisper: {error}")
-            
-=======
-        elif whisper is None:
->>>>>>> a3930666b640be8af37ffb825ed0b1cedb763eb0
-            self.whisper_model = None
-        elif not self.ffmpeg_disponivel:
-            print("⚠️  FFmpeg não foi encontrado no sistema. Whisper ficará desativado até que o programa seja instalado e disponível no PATH.")
-            print("   • Windows: instale em https://www.gyan.dev/ffmpeg e adicione a pasta /bin ao PATH.")
-            print("   • Linux: utilize o gerenciador de pacotes (ex.: sudo apt install ffmpeg).")
-            print("   • macOS: instale via Homebrew (brew install ffmpeg).")
+        self.edge_tts_voice = os.getenv("EDGE_TTS_VOICE", "pt-BR-AntonioNeural")
+        self._pygame_inicializado = False
 
         self.sistema = platform.system()
         self.apps = self.configurar_apps()
         self.processos = self.configurar_processos()
         self.nome_usuario = "Mestre Eduardo"
-
-    def _carregar_variaveis_ambiente(self):
-        arquivo_env = os.getenv("ASSISTENTE_ENV_FILE", ".env")
-        if not os.path.isfile(arquivo_env):
-            return
-
-        try:
-            with open(arquivo_env, encoding="utf-8") as handler:
-                for linha in handler:
-                    linha = linha.strip()
-                    if not linha or linha.startswith("#") or "=" not in linha:
-                        continue
-
-                    chave, valor = linha.split("=", 1)
-                    chave = chave.strip()
-                    valor = valor.strip().strip('"').strip("'")
-                    os.environ.setdefault(chave, valor)
-        except OSError as error:
-            print(f"⚠️  Não foi possível carregar variáveis do arquivo {arquivo_env}: {error}")
 
     def obter_saudacao_periodo(self):
         hora = datetime.now().hour
@@ -128,18 +64,7 @@ class AssistenteVoz:
             return f"Boa noite, {self.nome_usuario}"
 
     def configurar_voz(self):
-        if self.engine is None:
-            return
-
-        voices = self.engine.getProperty('voices')
-
-        for voice in voices:
-            if 'portuguese' in voice.name.lower() or 'brasil' in voice.name.lower():
-                self.engine.setProperty('voice', voice.id)
-                break
-
-        self.engine.setProperty('rate', 180)
-        self.engine.setProperty('volume', 0.9)
+        return
 
     def configurar_apps(self):
         if self.sistema == "Windows":
@@ -153,8 +78,6 @@ class AssistenteVoz:
                 'edge': 'start microsoft-edge:',
                 'spotify': 'start spotify:',
                 'steam': 'C:\\Program Files (x86)\\Steam\\steam.exe',
-                'cursor': 'cursor .',
-                'vscode': 'code .'
             }
         elif self.sistema == "Linux":
             return {
@@ -166,8 +89,6 @@ class AssistenteVoz:
                 'firefox': 'firefox',
                 'spotify': 'spotify',
                 'steam': 'steam',
-                'cursor': 'cursor .',
-                'vscode': 'code .'
             }
         elif self.sistema == "Darwin":
             return {
@@ -179,8 +100,6 @@ class AssistenteVoz:
                 'safari': 'open -a "Safari"',
                 'spotify': 'open -a "Spotify"',
                 'steam': 'open -a "Steam"',
-                'cursor': 'cursor .',
-                'vscode': 'code .'
             }
         return {}
 
@@ -196,7 +115,6 @@ class AssistenteVoz:
                 'edge': 'msedge.exe',
                 'spotify': 'Spotify.exe',
                 'steam': 'steam.exe',
-                'cursor': 'cursor.exe'
             }
         elif self.sistema == "Linux":
             return {
@@ -224,21 +142,25 @@ class AssistenteVoz:
 
     def falar(self, texto):
         print(f"🤖 Assistente: {texto}")
-        if self.elevenlabs_client is not None and play is not None:
-            try:
-                audio = self.elevenlabs_client.generate(
-                    text=texto,
-                    voice=self.elevenlabs_voice,
-                    model=self.elevenlabs_model,
-                )
-                play(audio)
-                return
-            except Exception as error:
-                print(f"⚠️  Falha ao utilizar o ElevenLabs: {error}")
 
-        if self.engine is not None:
-            self.engine.say(texto)
-            self.engine.runAndWait()
+        caminho = None
+        try:
+            caminho = _run_async(_gerar_audio_edge_tts(texto, voz=self.edge_tts_voice))
+
+            if not self._pygame_inicializado:
+                pygame.mixer.init()
+                self._pygame_inicializado = True
+
+            pygame.mixer.music.load(caminho)
+            pygame.mixer.music.play()
+            while pygame.mixer.music.get_busy():
+                pygame.time.Clock().tick(10)
+        finally:
+            if caminho and os.path.isfile(caminho):
+                try:
+                    os.unlink(caminho)
+                except OSError:
+                    pass
 
     def ouvir(self):
         with self.microphone as source:
@@ -249,33 +171,9 @@ class AssistenteVoz:
                 audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=5)
                 print("🔄 Processando...")
 
-                if self.whisper_model is not None:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
-                        temp_audio.write(audio.get_wav_data())
-                        temp_path = temp_audio.name
-
-                    try:
-                        resultado = self.whisper_model.transcribe(
-                            temp_path,
-                            language="pt",
-                            task="transcribe",
-                            fp16=False,
-                        )
-                        comando = resultado.get("text", "").strip()
-                    finally:
-                        try:
-                            os.remove(temp_path)
-                        except OSError:
-                            pass
-                else:
-                    comando = self.recognizer.recognize_google(audio, language='pt-BR')
-
-                if comando:
-                    print(f"👤 Você disse: {comando}")
-                    return comando.lower()
-                else:
-                    print("❌ Nenhuma transcrição encontrada.")
-                    return None
+                comando = self.recognizer.recognize_google(audio, language='pt-BR')
+                print(f"👤 Você disse: {comando}")
+                return comando.lower()
 
             except sr.WaitTimeoutError:
                 print("⏱️  Tempo esgotado. Nenhum som detectado.")
@@ -286,62 +184,9 @@ class AssistenteVoz:
             except sr.RequestError:
                 print("❌ Erro ao conectar ao serviço de reconhecimento de voz.")
                 return None
-            except Exception as error:
-                print(f"❌ Erro inesperado no reconhecimento de voz: {error}")
-                return None
 
-<<<<<<< HEAD
-=======
-    def _verificar_ffmpeg(self):
-        caminho = shutil.which("ffmpeg")
-        if caminho is None:
-            return False
-        return True
-
-    def _transcrever_com_whisper(self, audio):
-        if not self.ffmpeg_disponivel:
-            return None
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
-            temp_audio.write(audio.get_wav_data())
-            temp_path = temp_audio.name
-
-        try:
-            resultado = self.whisper_model.transcribe(
-                temp_path,
-                language="pt",
-                task="transcribe",
-                fp16=False,
-            )
-            return resultado.get("text", "").strip()
-        except FileNotFoundError as error:
-            if self.ffmpeg_disponivel:
-                print(f"⚠️  Whisper encontrou um problema ao chamar o FFmpeg: {error}")
-            else:
-                print("⚠️  Whisper precisa do FFmpeg instalado no sistema para funcionar. Voltando para o reconhecimento do Google.")
-            self.ffmpeg_disponivel = False
-            return None
-        except Exception as error:
-            print(f"⚠️  Não foi possível transcrever com o Whisper: {error}")
-            return None
-        finally:
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
-
-    def _transcrever_com_google(self, audio):
-        try:
-            return self.recognizer.recognize_google(audio, language='pt-BR')
-        except sr.UnknownValueError:
-            raise
-        except sr.RequestError:
-            raise
-        except Exception as error:
-            print(f"⚠️  Não foi possível usar o reconhecimento do Google: {error}")
-            return None
-
->>>>>>> a3930666b640be8af37ffb825ed0b1cedb763eb0
     def abrir_app(self, app_nome):
+        """Abre um aplicativo específico"""
         if app_nome in self.apps:
             self.falar(f"Abrindo {app_nome}")
             try:
@@ -356,6 +201,7 @@ class AssistenteVoz:
             return False
 
     def fechar_app(self, app_nome):
+        """Fecha um aplicativo específico"""
         if app_nome in self.processos:
             self.falar(f"Fechando {app_nome}")
             try:
@@ -387,6 +233,7 @@ class AssistenteVoz:
             return False
 
     def desligar_pc(self):
+        """Desliga o computador"""
         self.falar("Desligando o computador em 1 minuto")
         if self.sistema == "Windows":
             os.system("shutdown /s /t 60")
@@ -396,6 +243,7 @@ class AssistenteVoz:
             os.system("sudo shutdown -h +1")
 
     def reiniciar_pc(self):
+        """Reinicia o computador"""
         self.falar("Reiniciando o computador em 1 minuto")
         if self.sistema == "Windows":
             os.system("shutdown /r /t 60")
@@ -405,6 +253,7 @@ class AssistenteVoz:
             os.system("sudo shutdown -r +1")
 
     def cancelar_desligamento(self):
+        """Cancela o desligamento do computador"""
         self.falar("Cancelando o desligamento")
         if self.sistema == "Windows":
             os.system("shutdown /a")
@@ -414,6 +263,7 @@ class AssistenteVoz:
             os.system("sudo killall shutdown")
 
     def abrir_site(self, site):
+        """Abre um site no navegador padrão"""
         sites = {
             'youtube': 'https://www.youtube.com',
             'google': 'https://www.google.com',
@@ -423,7 +273,6 @@ class AssistenteVoz:
             'github': 'https://www.github.com',
             'amazon': 'https://www.amazon.com.br',
             'mercado livre': 'https://www.mercadolivre.com.br',
-            'linkedin': 'https://www.linkedin.com',
         }
 
         if site in sites:
@@ -435,21 +284,25 @@ class AssistenteVoz:
             return False
 
     def pesquisar_google(self, termo):
+        """Faz uma pesquisa no Google"""
         self.falar(f"Pesquisando {termo} no Google")
         url = f"https://www.google.com/search?q={termo}"
         webbrowser.open(url)
 
     def pesquisar_youtube(self, termo):
+        """Faz uma pesquisa no YouTube"""
         self.falar(f"Pesquisando {termo} no YouTube")
         url = f"https://www.youtube.com/results?search_query={termo}"
         webbrowser.open(url)
 
     def que_horas_sao(self):
+        """Informa as horas atuais"""
         agora = datetime.now()
         horas = agora.strftime("%H:%M")
         self.falar(f"São {horas}")
 
     def que_dia_e_hoje(self):
+        """Informa a data atual"""
         agora = datetime.now()
         dias_semana = ['segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado', 'domingo']
         dia_semana = dias_semana[agora.weekday()]
@@ -457,6 +310,7 @@ class AssistenteVoz:
         self.falar(f"Hoje é {dia_semana}, dia {data}")
 
     def aumentar_volume(self):
+        """Aumenta o volume do sistema"""
         self.falar("Aumentando o volume")
         if self.sistema == "Windows":
             os.system("nircmd.exe changesysvolume 5000")
@@ -466,6 +320,7 @@ class AssistenteVoz:
             os.system("osascript -e 'set volume output volume (output volume of (get volume settings) + 10)'")
 
     def diminuir_volume(self):
+        """Diminui o volume do sistema"""
         self.falar("Diminuindo o volume")
         if self.sistema == "Windows":
             os.system("nircmd.exe changesysvolume -5000")
@@ -475,6 +330,7 @@ class AssistenteVoz:
             os.system("osascript -e 'set volume output volume (output volume of (get volume settings) - 10)'")
 
     def silenciar_volume(self):
+        """Silencia o volume do sistema"""
         self.falar("Silenciando")
         if self.sistema == "Windows":
             os.system("nircmd.exe mutesysvolume 1")
@@ -484,6 +340,7 @@ class AssistenteVoz:
             os.system("osascript -e 'set volume output muted true'")
 
     def bloquear_pc(self):
+        """Bloqueia o computador"""
         self.falar("Bloqueando o computador")
         if self.sistema == "Windows":
             os.system("rundll32.exe user32.dll,LockWorkStation")
@@ -493,6 +350,7 @@ class AssistenteVoz:
             os.system("/System/Library/CoreServices/Menu\\ Extras/User.menu/Contents/Resources/CGSession -suspend")
 
     def info_sistema(self):
+        """Informa informações do sistema"""
         try:
             cpu = psutil.cpu_percent(interval=1)
             memoria = psutil.virtual_memory().percent
@@ -508,6 +366,7 @@ class AssistenteVoz:
             print(f"Erro: {e}")
 
     def contar_piada(self):
+        """Conta uma piada aleatória"""
         piadas = [
             "Por que o Python foi ao médico? Porque estava com problemas de sintaxe!",
             "Por que os programadores preferem o modo escuro? Porque a luz atrai bugs!",
@@ -517,17 +376,35 @@ class AssistenteVoz:
         ]
         self.falar(random.choice(piadas))
 
+    def tocar_musica(self, termo: str | None = None):
+        """Abre uma busca no Spotify pelo termo informado."""
+        termo = (termo or "").strip()
+        if not termo:
+            self.falar("Qual música ou artista você quer ouvir?")
+            resposta = self.ouvir()
+            termo = (resposta or "").strip()
+
+        if not termo:
+            self.falar("Ok, não entendi o nome da música.")
+            return
+
+        self.falar(f"Colocando {termo} no Spotify")
+        # Funciona mesmo sem o app instalado: abre no navegador.
+        webbrowser.open(f"https://open.spotify.com/search/{termo}")
+
     def tocar_musica_aleatoria(self):
-        self.falar(f"Abrindo música para você, {self.nome_usuario}")
-        webbrowser.open("https://www.youtube.com/results?search_query=música+relaxante")
+        """Compatibilidade: mantém o comando antigo abrindo uma busca genérica."""
+        self.tocar_musica("música relaxante")
 
     def modo_produtivo(self):
+        """Fecha redes sociais e abre ferramentas de produtividade"""
         self.falar(f"Ativando modo produtivo, {self.nome_usuario}")
         if self.sistema == "Windows":
             os.system("taskkill /F /IM chrome.exe /FI \"WINDOWTITLE eq *Facebook*\"")
             os.system("taskkill /F /IM chrome.exe /FI \"WINDOWTITLE eq *Instagram*\"")
 
     def tirar_screenshot(self):
+        """Tira um screenshot da tela"""
         self.falar("Capturando a tela")
         if self.sistema == "Windows":
             os.system("snippingtool")
@@ -537,10 +414,12 @@ class AssistenteVoz:
             os.system("screencapture -i ~/Desktop/screenshot.png")
 
     def limpar_tela(self):
+        """Limpa o terminal"""
         os.system('cls' if self.sistema == "Windows" else 'clear')
         self.falar("Tela limpa")
 
     def abrir_calculadora(self):
+        """Abre a calculadora"""
         self.falar("Abrindo calculadora")
         if self.sistema == "Windows":
             os.system("calc")
@@ -550,6 +429,7 @@ class AssistenteVoz:
             os.system("open -a Calculator")
 
     def abrir_bloco_notas(self):
+        """Abre o bloco de notas"""
         self.falar("Abrindo bloco de notas")
         if self.sistema == "Windows":
             os.system("notepad")
@@ -559,6 +439,7 @@ class AssistenteVoz:
             os.system("open -a TextEdit")
 
     def abrir_gerenciador_tarefas(self):
+        """Abre o gerenciador de tarefas"""
         self.falar("Abrindo gerenciador de tarefas")
         if self.sistema == "Windows":
             os.system("taskmgr")
@@ -568,18 +449,22 @@ class AssistenteVoz:
             os.system("open -a 'Activity Monitor'")
 
     def abrir_previsao_tempo(self):
+        """Abre previsão do tempo"""
         self.falar("Abrindo previsão do tempo")
         webbrowser.open("https://www.google.com/search?q=previsão+do+tempo")
 
     def abrir_noticias(self):
+        """Abre portal de notícias"""
         self.falar("Abrindo notícias")
         webbrowser.open("https://news.google.com")
 
     def abrir_email(self):
+        """Abre o email"""
         self.falar("Abrindo email")
         webbrowser.open("https://mail.google.com")
 
     def discord_silenciar(self):
+        """Silencia/Desilencia o microfone no Discord (Ctrl+Shift+M)"""
         self.falar("Alternando microfone no Discord")
         keyboard = Controller()
         keyboard.press(Key.ctrl)
@@ -590,6 +475,7 @@ class AssistenteVoz:
         keyboard.release(Key.ctrl)
 
     def discord_deafen(self):
+        """Silencia/Desilencia o áudio no Discord (Ctrl+Shift+D)"""
         self.falar("Alternando áudio no Discord")
         keyboard = Controller()
         keyboard.press(Key.ctrl)
@@ -600,6 +486,7 @@ class AssistenteVoz:
         keyboard.release(Key.ctrl)
 
     def discord_sair_chamada(self):
+        """Desconecta da chamada no Discord (Ctrl+Shift+H)"""
         self.falar("Saindo da chamada no Discord")
         keyboard = Controller()
         keyboard.press(Key.ctrl)
@@ -610,24 +497,28 @@ class AssistenteVoz:
         keyboard.release(Key.ctrl)
 
     def spotify_tocar_pausar(self):
-        self.falar("Alternando música no Spotify")
+        """Toca ou pausa a música no Spotify"""
+        self.falar("Pausando musica")
         keyboard = Controller()
         keyboard.press(Key.media_play_pause)
         keyboard.release(Key.media_play_pause)
 
     def spotify_proxima(self):
+        """Pula para a próxima música no Spotify"""
         self.falar("Próxima música")
         keyboard = Controller()
         keyboard.press(Key.media_next)
         keyboard.release(Key.media_next)
 
     def spotify_anterior(self):
+        """Volta para a música anterior no Spotify"""
         self.falar("Música anterior")
         keyboard = Controller()
         keyboard.press(Key.media_previous)
         keyboard.release(Key.media_previous)
 
     def processar_comando(self, comando):
+        """Processa o comando de voz recebido"""
         if not comando:
             return True
 
@@ -721,7 +612,12 @@ class AssistenteVoz:
             self.contar_piada()
 
         elif "tocar música" in comando or "reproduzir música" in comando:
-            self.tocar_musica_aleatoria()
+            termo = (
+                comando.replace("tocar música", "")
+                .replace("reproduzir música", "")
+                .strip()
+            )
+            self.tocar_musica(termo)
 
         elif "modo produtivo" in comando or "foco total" in comando:
             self.modo_produtivo()
@@ -786,6 +682,7 @@ class AssistenteVoz:
         return True
 
     def mostrar_ajuda(self):
+        """Mostra os comandos disponíveis"""
         comandos = [
             "Desligar/Reiniciar/Cancelar desligamento/Bloquear o computador",
             "Abrir aplicativos: " + ", ".join(list(self.apps.keys())[:5]) + "...",
@@ -812,6 +709,7 @@ class AssistenteVoz:
         self.falar("Mostrei os comandos disponíveis na tela.")
 
     def executar(self):
+        """Loop principal do assistente"""
         saudacao = self.obter_saudacao_periodo()
         self.falar(f"{saudacao}! Assistente de voz iniciado e pronto para servi-lo. Diga 'ajuda' para ver os comandos disponíveis.")
 
@@ -833,7 +731,7 @@ def main():
     print("🤖 ASSISTENTE DE VOZ PARA CONTROLE DO COMPUTADOR")
     print("="*60)
     print("\n⚠️  REQUISITOS:")
-    print("  pip install SpeechRecognition pyttsx3 pyaudio psutil")
+    print("  pip install SpeechRecognition pyaudio psutil edge-tts pygame")
     print("\n💡 DICA: Fale de forma clara e pausada")
     print("="*60)
 
@@ -843,7 +741,7 @@ def main():
     except Exception as e:
         print(f"\n❌ Erro ao iniciar o assistente: {e}")
         print("\nVerifique se você instalou todas as dependências:")
-        print("  pip install SpeechRecognition pyttsx3 pyaudio psutil")
+        print("  pip install SpeechRecognition pyaudio psutil edge-tts pygame")
         sys.exit(1)
 
 
